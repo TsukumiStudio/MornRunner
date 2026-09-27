@@ -174,7 +174,7 @@ struct MornRunnerApp: App {
         Window("MornRunner — セットアップ", id: "setup") {
             SetupView(model: setup, monitor: monitor, updater: updater)
         }
-        .defaultSize(width: 620, height: 750)
+        .defaultSize(width: 560, height: 580)
         .commands {
             CommandGroup(replacing: .appTermination) {
                 Button("MornRunner を終了") { NSApp.terminate(nil) }
@@ -211,20 +211,19 @@ struct Dashboard: View {
                     .font(.system(size: 32)).foregroundStyle(monitor.snapshot.state.color)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(monitor.snapshot.state.title).font(.title2.bold())
-                    Text(monitor.snapshot.name).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            Text(monitor.snapshot.detail).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12).background(monitor.snapshot.state.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            HStack {
+            if [.busy, .offline, .unknown].contains(monitor.snapshot.state) {
+                Text(monitor.snapshot.detail).font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !monitor.snapshot.githubURL.isEmpty {
                 Text(monitor.snapshot.githubURL.replacingOccurrences(of: "https://github.com/", with: ""))
-                Spacer()
-                Text(monitor.snapshot.checkedAt, style: .time).monospacedDigit()
-            }.font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
-                Button("ランナーを起動", systemImage: "play.fill") { monitor.control(start: true) }
+                Button("起動", systemImage: "play.fill") { monitor.control(start: true) }
                     .buttonStyle(.borderedProminent)
                     .disabled(monitor.isWorking || monitor.isInstalling || monitor.snapshot.listenerRunning || monitor.snapshot.state == .unknown || monitor.snapshot.state == .notConfigured)
                 Button("停止", systemImage: "stop.fill") { confirmStop = true }
@@ -236,7 +235,7 @@ struct Dashboard: View {
                 Button("キャンセル", role: .cancel) {}
                 Button("停止", role: .destructive) { monitor.control(start: false) }
             } message: {
-                Text("実行中のジョブは中断されます。停止後は「ランナーを起動」で再開できます。")
+                Text("実行中のジョブは中断されます。")
             }
             if let error = monitor.error {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -247,39 +246,27 @@ struct Dashboard: View {
             }
             Divider()
             HStack {
-                Button("新しいランナーを設定", systemImage: "plus") {
+                Button("新規設定", systemImage: "plus") {
                     openWindow(id: "setup")
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Button("既存を追加…") { monitor.selectFolder() }.disabled(monitor.isWorking || monitor.isInstalling)
             }
             HStack {
-                Button("ログを開く", systemImage: "doc.text") { monitor.openLogs() }
-                Button("GitHub を開く", systemImage: "arrow.up.right.square") { monitor.openGitHub() }
+                Button("ログ", systemImage: "doc.text") { monitor.openLogs() }
+                Button("GitHub", systemImage: "arrow.up.right.square") { monitor.openGitHub() }
                     .disabled(monitor.snapshot.githubURL.isEmpty)
             }
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("監視フォルダ").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("変更…") { monitor.selectFolder() }.buttonStyle(.link).disabled(monitor.isWorking || monitor.isInstalling)
-                }
-                Text(monitor.root.path).font(.caption).lineLimit(2).textSelection(.enabled)
-            }
-            Toggle("ログイン時に MornRunner を起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
+            Toggle("ログイン時に起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
                 .toggleStyle(.switch).controlSize(.small)
-            Text("5 秒ごとに、この Mac のプロセスとログから判定します。GitHub 側の表示とは遅れが生じる場合があります。")
-                .font(.caption).foregroundStyle(.secondary)
             Divider()
             UpdateControls(updater: updater).disabled(monitor.isWorking || monitor.isInstalling)
             HStack {
-                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0")")
+                Text("v\(Updater.version)")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("アプリを終了") { NSApp.terminate(nil) }.disabled(monitor.isInstalling || updater.isWorking)
             }
-            Text("アプリを終了してもランナーは動き続けます。")
-                .font(.caption2).foregroundStyle(.secondary)
         }
         .padding(20).frame(width: 370)
     }

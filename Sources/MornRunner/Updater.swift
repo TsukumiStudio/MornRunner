@@ -186,12 +186,12 @@ struct UpdateControls: View {
             case .idle:
                 Button("最新を確認") { Task { await updater.check() } }
             case .checking:
-                HStack { ProgressView().controlSize(.small); Text("最新版を確認中…") }
+                HStack { ProgressView().controlSize(.small); Text("確認中…") }
             case .upToDate:
                 Button("最新版です · 再確認") { Task { await updater.check() } }
             case .available(let tag):
                 HStack {
-                    Text("\(tag) が利用できます").font(.caption)
+                    Text(tag).font(.caption)
                     Spacer()
                     Button("最新へ更新") { Task { await updater.update() } }.buttonStyle(.borderedProminent)
                 }
@@ -200,7 +200,7 @@ struct UpdateControls: View {
             case .updated:
                 Button("再起動して適用") { updater.restart() }.buttonStyle(.borderedProminent)
             case .failed(let message):
-                Button("最新を確認・再試行") { Task { await updater.check() } }
+                Button("再試行") { Task { await updater.check() } }
                 Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
             }
         }

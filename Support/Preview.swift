@@ -17,8 +17,8 @@ struct Preview {
         let updater = Updater()
         let destination = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        try render(SetupView(model: setup, monitor: monitor, updater: updater), size: NSSize(width: 620, height: 790), to: destination.appendingPathComponent("setup.png"))
-        try render(Dashboard(monitor: monitor, updater: updater), size: NSSize(width: 370, height: 760), to: destination.appendingPathComponent("dashboard.png"))
+        try render(SetupView(model: setup, monitor: monitor, updater: updater), size: NSSize(width: 560, height: 580), to: destination.appendingPathComponent("setup.png"))
+        try render(Dashboard(monitor: monitor, updater: updater), size: NSSize(width: 370, height: 460), to: destination.appendingPathComponent("dashboard.png"))
     }
 
     @MainActor static func render<V: View>(_ view: V, size: NSSize, to url: URL) throws {

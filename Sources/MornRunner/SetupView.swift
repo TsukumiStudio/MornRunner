@@ -87,11 +87,7 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("この Mac を GitHub Actions のランナーに", systemImage: "desktopcomputer").font(.title2.bold())
-                    Text("登録先を指定するだけで、導入から起動まで MornRunner が案内します。")
-                        .foregroundStyle(.secondary)
-                }
+                Label("ランナーを追加", systemImage: "desktopcomputer").font(.title2.bold())
                 if let result = model.outcome {
                     completion(result)
                 } else {
@@ -100,7 +96,7 @@ struct SetupView: View {
             }
             .padding(28)
         }
-        .frame(minWidth: 570, idealWidth: 620, minHeight: 660, idealHeight: 750)
+        .frame(minWidth: 500, idealWidth: 560, minHeight: 500, idealHeight: 580)
         .disabled(updater.isWorking || updater.state == .updated)
     }
 
@@ -108,44 +104,41 @@ struct SetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("1. GitHub の登録先").font(.headline)
-                    TextField("https://github.com/owner または owner/repository", text: $model.target)
+                    Text("登録先").font(.headline)
+                    TextField("owner または owner/repository", text: $model.target)
                         .textFieldStyle(.roundedBorder)
-                    Text("github.com の Organization／リポジトリに対応。登録先の管理権限が必要です。")
-                        .font(.caption).foregroundStyle(.secondary)
                 }.padding(8)
             }
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("2. ランナーの設定").font(.headline)
+                    Text("ランナー").font(.headline)
                     LabeledContent("名前") { TextField("my-mac", text: $model.name).textFieldStyle(.roundedBorder) }
-                    LabeledContent("追加ラベル") { TextField("任意: build, unity", text: $model.labels).textFieldStyle(.roundedBorder) }
-                    HStack {
-                        Text(model.parent.appendingPathComponent(model.name).path).font(.caption).textSelection(.enabled)
-                        Spacer()
-                        Button("保存先を変更…") { model.chooseParent() }
+                    DisclosureGroup("詳細") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            LabeledContent("ラベル") { TextField("任意", text: $model.labels).textFieldStyle(.roundedBorder) }
+                            HStack {
+                                Text(model.parent.appendingPathComponent(model.name).path).font(.caption).textSelection(.enabled)
+                                Spacer()
+                                Button("保存先…") { model.chooseParent() }
+                            }
+                        }.padding(.top, 8)
                     }
-                    Text("この Mac 用の公式ランナーを自動取得し、ログイン時に起動するサービスを設定します。")
-                        .font(.caption).foregroundStyle(.secondary)
                 }.padding(8)
             }
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("3. GitHub の登録トークン").font(.headline)
+                    Text("登録トークン").font(.headline)
                     HStack {
-                        Button("GitHub の登録画面を開く", systemImage: "arrow.up.right.square") {
+                        Button("GitHub で取得", systemImage: "arrow.up.right.square") {
                             if let url = model.targetURL?.registrationPage { NSWorkspace.shared.open(url) }
                         }.disabled(model.targetURL == nil)
                         if RunnerInstaller.ghPath != nil {
-                            Button(model.fetchingToken ? "取得中…" : "GitHub CLI で取得") { model.fetchToken() }
+                            Button(model.fetchingToken ? "取得中…" : "CLI で取得") { model.fetchToken() }
                                 .disabled(model.targetURL == nil || model.fetchingToken)
                         }
                     }
-                    Text("登録画面の Configure 欄にある --token の値をコピーしてください。有効期限は 1 時間です。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    SecureField("登録トークン", text: $model.token).textFieldStyle(.roundedBorder)
-                    Text("入力したトークンはアプリの設定に保存しません。")
-                        .font(.caption).foregroundStyle(.secondary)
+                    SecureField("--token の値を貼り付け", text: $model.token).textFieldStyle(.roundedBorder)
+                        .help("GitHub の Configure 欄にある --token の値。有効期限は1時間です。")
                 }.padding(8)
             }
         }
@@ -159,10 +152,8 @@ struct SetupView: View {
                     Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
                 }
                 HStack {
-                    Text("GitHub のワークフローがこの Mac 上で実行されます。")
-                        .font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button(model.error == nil ? "セットアップして起動" : "再試行") { model.install(monitor: monitor) }
+                    Button(model.error == nil ? "登録して起動" : "再試行") { model.install(monitor: monitor) }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.isWorking || model.fetchingToken || model.request == nil)
                 }
@@ -172,28 +163,27 @@ struct SetupView: View {
 
     private func completion(_ result: SetupOutcome) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label(result.snapshot.state == .idle || result.snapshot.state == .busy ? "セットアップ完了" : "登録・起動設定が完了しました", systemImage: "checkmark.circle.fill")
+            Label(result.snapshot.state == .idle || result.snapshot.state == .busy ? "セットアップ完了" : "登録済み", systemImage: "checkmark.circle.fill")
                 .font(.title2).foregroundStyle(.green)
             Text("現在の状態: \(monitor.root == result.root ? monitor.snapshot.state.title : result.snapshot.state.title)")
-            Text("メニューバーから稼働状態を確認し、起動・停止できます。")
-            Text("ワークフローの jobs にある runs-on に設定してください。").font(.headline)
+            Text("ワークフロー設定").font(.headline)
             Text(model.workflow).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             HStack {
-                Button("設定例をコピー") {
+                Button("コピー") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.workflow, forType: .string)
                 }
-                Button("ログを開く") { NSWorkspace.shared.open(result.root.appendingPathComponent("_diag")) }
+                Button("ログ") { NSWorkspace.shared.open(result.root.appendingPathComponent("_diag")) }
                 Spacer()
-                Button("別のランナーを追加") {
+                Button("追加") {
                     model.outcome = nil
                     model.token = ""
                     model.name += "-2"
                 }
             }
-            Toggle("ログイン時に MornRunner も起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
+            Toggle("ログイン時に起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
                 .toggleStyle(.switch)
         }
     }
