@@ -1,0 +1,89 @@
+name: Release mac app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mornrunner-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || vars.MORN_RELEASE_AUTOMATION == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release secrets
+        env:
+          MORN_NOTARY_TOKEN: ${{ secrets.MORN_NOTARY_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in MORN_NOTARY_TOKEN HOMEBREW_TAP_TOKEN; do
+            if [ -z "${!name:-}" ]; then echo "::error::Set ${name} in Actions secrets."; exit 1; fi
+          done
+      - name: Test
+        run: swift test
+      - name: Build universal app
+        run: |
+          set -euo pipefail
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)
+          if [ "$GITHUB_EVENT_NAME" = push ]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          VERSION="$VERSION" UNIVERSAL=1 zsh build.sh
+      - name: Sign and notarize via MornNotary
+        env:
+          GH_TOKEN: ${{ secrets.MORN_NOTARY_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone matsufriends/MornNotary "$RUNNER_TEMP/MornNotary" -- --depth 1
+          bash "$RUNNER_TEMP/MornNotary/sign.sh" dist/MornRunner.app
+          mv dist/MornRunner-signed.zip dist/MornRunner.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MornRunner
+          path: dist/MornRunner.app.zip
+      - name: Prepare Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone TsukumiStudio/homebrew-tap tap -- --depth 1
+          SHA=$(shasum -a 256 dist/MornRunner.app.zip | awk '{print $1}')
+          mkdir -p tap/Casks
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/@SHA256@/${SHA}/g" Support/mornrunner.rb.in > tap/Casks/mornrunner.rb
+          ruby -c tap/Casks/mornrunner.rb
+          git -C tap push --dry-run origin HEAD:main
+      - name: Publish release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/MornRunner.app.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/MornRunner.app.zip --generate-notes
+          fi
+      - name: Update Homebrew tap
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Casks/mornrunner.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "mornrunner ${VERSION}"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
