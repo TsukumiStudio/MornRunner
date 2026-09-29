@@ -20,6 +20,22 @@ struct RunnerStatusTests {
         #expect(LogStatus.parse("").0 == .connecting)
     }
 
+    // The runner does not log "Runner reconnected." when polling recovers, e.g. after the Mac wakes from sleep.
+    @Test func testQuietPeriodAfterConnectErrorCountsAsRecovery() throws {
+        let log = """
+        [2026-09-29 14:55:28Z ERR  Terminal] WRITE ERROR: 2026-09-29 14:55:28Z: Runner connect error: The HTTP request timed out after 00:01:40.. Retrying until reconnected.
+        [2026-09-29 15:00:34Z ERR  BrokerServer] Catch exception during request
+        [2026-09-29 15:00:34Z WARN BrokerServer] Back off 10.068 seconds before next retry. 4 attempt left.
+
+        """
+        let lastError = try #require(ISO8601DateFormatter().date(from: "2026-09-29T15:00:34Z"))
+        #expect(LogStatus.parse(log, now: lastError.addingTimeInterval(60)).0 == .offline)
+        #expect(LogStatus.parse(log, now: lastError.addingTimeInterval(LogStatus.recoveryGrace + 1)).0 == .idle)
+        #expect(LogStatus.parse(log, now: lastError.addingTimeInterval(LogStatus.recoveryGrace + 1)).1 == "接続エラーから復帰しました")
+        let stillFailing = log + "[2026-09-29 15:04:00Z ERR  BrokerMessageListener] Catch exception during get next message\n"
+        #expect(LogStatus.parse(stillFailing, now: lastError.addingTimeInterval(LogStatus.recoveryGrace + 1)).0 == .offline)
+    }
+
     @Test func testOldLogsCannotMakeNewProcessLookReady() throws {
         let started = try #require(LogStatus.date(of: "Runner_20260927-095054-utc.log"))
         #expect(LogStatus.belongsToCurrentListener(filename: "Runner_20260927-095054-utc.log", started: started))

@@ -45,10 +45,23 @@ struct RunnerSnapshot: Codable {
 
 /// Interpret only a log belonging to the currently running listener.
 enum LogStatus {
-    static func parse(_ log: String) -> (RunnerState, String) {
+    /// The runner logs every failed poll attempt within this interval while a connection error persists,
+    /// but writes "Runner reconnected." only when it re-creates its session, not when polling recovers.
+    static let recoveryGrace: TimeInterval = 300
+
+    static func parse(_ log: String, now: Date = Date()) -> (RunnerState, String) {
         var state: RunnerState = .connecting
         var detail = "GitHub への接続を確認しています"
+        var lastError: Date?
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss'Z'"
         for line in log.components(separatedBy: .newlines) {
+            if line.contains(" ERR ") || line.contains("connect error:"), line.hasPrefix("["),
+               let date = formatter.date(from: String(line.dropFirst().prefix(20))) {
+                lastError = date
+            }
             // Terminal messages describe the runner lifecycle; a job's failure is not a connection failure.
             if line.contains("Listening for Jobs") {
                 state = .idle; detail = "ジョブを受け付けています"
@@ -63,6 +76,9 @@ enum LogStatus {
             } else if line.contains("exiting") && line.contains("Listener]") {
                 state = .connecting; detail = "ランナーの再接続を待っています"
             }
+        }
+        if state == .offline, let lastError, now.timeIntervalSince(lastError) > recoveryGrace {
+            state = .idle; detail = "接続エラーから復帰しました"
         }
         return (state, detail)
     }
