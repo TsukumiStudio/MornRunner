@@ -18,7 +18,19 @@ struct Preview {
         let destination = URL(fileURLWithPath: CommandLine.arguments[1])
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         try render(SetupView(model: setup, monitor: monitor, updater: updater), size: NSSize(width: 560, height: 580), to: destination.appendingPathComponent("setup.png"))
-        try render(Dashboard(monitor: monitor, updater: updater), size: NSSize(width: 370, height: 460), to: destination.appendingPathComponent("dashboard.png"))
+        try render(Dashboard(monitor: monitor, updater: updater), size: NSSize(width: 370, height: 500), to: destination.appendingPathComponent("dashboard.png"))
+        let activity = ActivityModel()
+        let sleep = try? LocalRunner.command("/usr/bin/pmset", ["-g", "log"]).output
+        activity.activity = ActivityLog.collect(root: monitor.root, busy: monitor.snapshot.state == .busy, sleepLog: sleep)
+        activity.loaded = true
+        try render(ActivityView(monitor: monitor, model: activity), size: NSSize(width: 880, height: 700), to: destination.appendingPathComponent("activity.png"))
+        var busy = activity.activity
+        busy.jobs.insert(JobRecord(name: "Run tests and build distributions", started: Date().addingTimeInterval(-154)), at: 0)
+        busy.progress = JobProgress(totalSteps: 24, completedSteps: 7, currentStep: "Import assets")
+        var snapshot = monitor.snapshot
+        snapshot.state = .busy
+        snapshot.detail = "Run tests and build distributions"
+        try render(ActivityHeader(snapshot: snapshot, activity: busy).padding(20), size: NSSize(width: 880, height: 190), to: destination.appendingPathComponent("activity-busy.png"))
     }
 
     @MainActor static func render<V: View>(_ view: V, size: NSSize, to url: URL) throws {

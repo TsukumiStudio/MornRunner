@@ -143,6 +143,7 @@ struct MornRunnerApp: App {
     @StateObject private var monitor = RunnerMonitor()
     @StateObject private var setup = SetupModel()
     @StateObject private var updater = Updater()
+    @StateObject private var activity = ActivityModel()
 
     init() {
         // A read-only diagnostic mode uses the same implementation as the menu bar.
@@ -175,6 +176,10 @@ struct MornRunnerApp: App {
             SetupView(model: setup, monitor: monitor, updater: updater)
         }
         .defaultSize(width: 560, height: 580)
+        Window("MornRunner — アクティビティ", id: "activity") {
+            ActivityView(monitor: monitor, model: activity)
+        }
+        .defaultSize(width: 880, height: 700)
         .commands {
             CommandGroup(replacing: .appTermination) {
                 Button("MornRunner を終了") { NSApp.terminate(nil) }
@@ -253,6 +258,10 @@ struct Dashboard: View {
                 Button("既存を追加…") { monitor.selectFolder() }.disabled(monitor.isWorking || monitor.isInstalling)
             }
             HStack {
+                Button("アクティビティ", systemImage: "list.bullet.rectangle") {
+                    openWindow(id: "activity")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
                 Button("ログ", systemImage: "doc.text") { monitor.openLogs() }
                 Button("GitHub", systemImage: "arrow.up.right.square") { monitor.openGitHub() }
                     .disabled(monitor.snapshot.githubURL.isEmpty)
