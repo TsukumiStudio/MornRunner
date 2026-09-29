@@ -45,10 +45,13 @@ jobs:
           gh repo clone matsufriends/MornNotary "$RUNNER_TEMP/MornNotary" -- --depth 1
           bash "$RUNNER_TEMP/MornNotary/sign.sh" dist/MornRunner.app
           mv dist/MornRunner-signed.zip dist/MornRunner.app.zip
+      # Tag pushes publish the same ZIP to the GitHub Release; keep an artifact only for manual runs.
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: MornRunner
           path: dist/MornRunner.app.zip
+          retention-days: 1
       - name: Prepare Homebrew cask
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
