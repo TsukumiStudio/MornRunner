@@ -196,7 +196,6 @@ struct Dashboard: View {
     @ObservedObject var monitor: RunnerMonitor
     @ObservedObject var updater: Updater
     @Environment(\.openWindow) private var openWindow
-    @State private var confirmStop = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -231,16 +230,10 @@ struct Dashboard: View {
                 Button("起動", systemImage: "play.fill") { monitor.control(start: true) }
                     .buttonStyle(.borderedProminent)
                     .disabled(monitor.isWorking || monitor.isInstalling || monitor.snapshot.listenerRunning || monitor.snapshot.state == .unknown || monitor.snapshot.state == .notConfigured)
-                Button("停止", systemImage: "stop.fill") { confirmStop = true }
+                Button("停止", systemImage: "stop.fill") { confirmStop() }
                     .disabled(monitor.isWorking || monitor.isInstalling || !monitor.snapshot.serviceLoaded)
                 if monitor.isWorking { ProgressView().controlSize(.small) }
                 Spacer()
-            }
-            .alert("ランナーを停止しますか？", isPresented: $confirmStop) {
-                Button("キャンセル", role: .cancel) {}
-                Button("停止", role: .destructive) { monitor.control(start: false) }
-            } message: {
-                Text("実行中のジョブは中断されます。")
             }
             if let error = monitor.error {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -278,5 +271,21 @@ struct Dashboard: View {
             }
         }
         .padding(20).frame(width: 370)
+    }
+
+    /// A sheet inside the menu bar popover cannot take key focus in an accessory app, so its buttons never respond.
+    /// Present a standalone modal alert instead.
+    func confirmStop() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "ランナーを停止しますか？"
+        alert.informativeText = "実行中のジョブは中断されます。"
+        alert.alertStyle = .warning
+        let stop = alert.addButton(withTitle: "停止")
+        stop.hasDestructiveAction = true
+        stop.keyEquivalent = ""
+        let cancel = alert.addButton(withTitle: "キャンセル")
+        cancel.keyEquivalent = "\r"
+        if alert.runModal() == .alertFirstButtonReturn { monitor.control(start: false) }
     }
 }
