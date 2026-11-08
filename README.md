@@ -71,12 +71,7 @@ jobs:
 
 ### アクティビティ
 
-カードのアクティビティボタンで、そのランナーの詳細ウィンドウが開きます。
-
-- 実行中ジョブのステップ進捗と経過時間
-- 直近のジョブ履歴（成功／失敗・所要時間）
-- 接続エラーや Mac のスリープのタイムライン（直近 14 日）
-- 診断ログの末尾（「要点のみ」で状態の変化だけに絞れます）
+カードのアクティビティボタンで、ジョブの進捗・履歴、接続エラーとスリープの記録（直近 14 日）、診断ログを見られます。
 
 ## 更新・アンインストール
 
@@ -119,14 +114,6 @@ dist/MornRunner.app/Contents/MacOS/MornRunner --status   # 状態を JSON で出
 
 古い Command Line Tools で失敗する場合は `bash Support/with-local-toolchain.sh swift test` を使います（システムのツールは変更しません）。
 `MORN_RUN_SERVICE_TEST=1` を付けると、一時 LaunchAgent の起動・停止も検証します（実ランナーには触れません）。
-
-| ファイル | 役割 |
-| --- | --- |
-| `MornRunnerApp.swift` | メニューバー・ランナー一覧 |
-| `SetupView.swift` / `RunnerSetup.swift` | セットアップ画面と導入処理 |
-| `RunnerProfiles.swift` / `RunnerStatus.swift` | ランナーの検出・状態判定・起動停止 |
-| `ActivityView.swift` / `RunnerActivity.swift` | アクティビティ画面とログ解析 |
-| `Updater.swift` | Homebrew / ZIP 版の更新 |
 
 ### リリース
 
