@@ -43,6 +43,18 @@ struct RunnerStatusTests {
         #expect(!LogStatus.belongsToCurrentListener(filename: "Worker_20260927-095054-utc.log", started: started))
     }
 
+    @Test func testLaterVersionCheckLogDoesNotHideListenerLog() throws {
+        let started = try #require(LogStatus.date(of: "Runner_20261103-075930-utc.log"))
+        let names = ["Runner_20261031-123917-utc.log", "Runner_20261103-075930-utc.log", "Runner_20261106-101446-utc.log", "Worker_20261108-003326-utc.log"]
+        #expect(LogStatus.currentListenerLog(filenames: names, started: started) == "Runner_20261103-075930-utc.log")
+        #expect(LogStatus.currentListenerLog(filenames: ["Runner_20261031-123917-utc.log"], started: started) == nil)
+    }
+
+    @Test func testVersionInvocationIsNotRunLog() {
+        #expect(LogStatus.isRunLog("[2026-11-03 07:59:31Z INFO CommandSettings] Command 'run': 'True'\n"))
+        #expect(!LogStatus.isRunLog("[2026-11-06 10:14:46Z INFO CommandSettings] Flag 'version': 'True'\n"))
+    }
+
     @Test func testMissingConfigurationShowsSetup() {
         let snapshot = LocalRunner.snapshot(root: URL(fileURLWithPath: "/nonexistent-mornrunner-test"))
         #expect(snapshot.state == .notConfigured)

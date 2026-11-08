@@ -201,7 +201,13 @@ enum ActivityLog {
         let files = ((try? FileManager.default.contentsOfDirectory(at: diag, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == "log" }
         let runnerLogs = files.filter { $0.lastPathComponent.hasPrefix("Runner_") }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }.suffix(logFiles)
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }.suffix(logFiles * 4)
+            .filter { url in
+                guard let file = try? FileHandle(forReadingFrom: url) else { return false }
+                defer { try? file.close() }
+                return LogStatus.isRunLog(String(decoding: (try? file.read(upToCount: 65_536)) ?? Data(), as: UTF8.self))
+            }
+            .suffix(logFiles)
         var jobs: [JobRecord] = []
         var events: [RunnerEvent] = []
         for (index, url) in runnerLogs.enumerated() {

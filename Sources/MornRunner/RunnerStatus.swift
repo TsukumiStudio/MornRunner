@@ -96,6 +96,15 @@ enum LogStatus {
         guard let date = date(of: filename) else { return false }
         return date >= started.addingTimeInterval(-2)
     }
+
+    /// The listener's own log is the first one created after it started. Later Runner_ logs come from
+    /// other invocations such as `Runner.Listener --version` and carry no connection state.
+    static func currentListenerLog(filenames: [String], started: Date) -> String? {
+        filenames.filter { belongsToCurrentListener(filename: $0, started: started) }.min()
+    }
+
+    /// Whether a Runner_ log was written by the listener's `run` command rather than a one-shot invocation like `--version`.
+    static func isRunLog(_ head: String) -> Bool { head.contains("Command 'run': 'True'") }
 }
 
 struct CommandResult {
@@ -205,14 +214,14 @@ enum LocalRunner {
             guard let started = formatter.date(from: String(processLine.trimmingCharacters(in: .whitespaces).prefix(24))) else {
                 throw RunnerError.message("プロセスの開始時刻を確認できません")
             }
-            let logs = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("_diag"), includingPropertiesForKeys: nil)
-                .filter { $0.lastPathComponent.hasPrefix("Runner_") && $0.pathExtension == "log" }
-                .sorted { $0.lastPathComponent > $1.lastPathComponent }
-            guard let latest = logs.first, LogStatus.belongsToCurrentListener(filename: latest.lastPathComponent, started: started) else {
+            let diag = root.appendingPathComponent("_diag")
+            let names = try FileManager.default.contentsOfDirectory(atPath: diag.path).filter { $0.hasSuffix(".log") }
+            guard let name = LogStatus.currentListenerLog(filenames: names, started: started) else {
                 result.state = .connecting
                 result.detail = "現在のプロセスの接続ログを待っています"
                 return result
             }
+            let latest = diag.appendingPathComponent(name)
             result.logPath = latest.path
             let parsed = LogStatus.parse(try tail(latest))
             result.state = parsed.0

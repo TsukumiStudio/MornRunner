@@ -67,9 +67,13 @@ struct ActivityTests {
         defer { try? fm.removeItem(at: root) }
         let diag = root.appendingPathComponent("_diag")
         try fm.createDirectory(at: diag, withIntermediateDirectories: true)
-        let older = "[2026-09-27 10:00:00Z INFO Terminal] WRITE LINE: 2026-09-27 10:00:00Z: Running job: cut off\n"
+        let run = "[2026-09-27 09:50:54Z INFO CommandSettings] Command 'run': 'True'\n"
+        let older = run + "[2026-09-27 10:00:00Z INFO Terminal] WRITE LINE: 2026-09-27 10:00:00Z: Running job: cut off\n"
         try older.write(to: diag.appendingPathComponent("Runner_20260927-095054-utc.log"), atomically: true, encoding: .utf8)
-        try runnerLog.write(to: diag.appendingPathComponent("Runner_20260929-140000-utc.log"), atomically: true, encoding: .utf8)
+        try (run + runnerLog).write(to: diag.appendingPathComponent("Runner_20260929-140000-utc.log"), atomically: true, encoding: .utf8)
+        // A later `Runner.Listener --version` must not count as a start or replace the listener's log.
+        let version = "[2026-09-29 16:20:00Z INFO CommandSettings] Flag 'version': 'True'\n"
+        try version.write(to: diag.appendingPathComponent("Runner_20260929-162000-utc.log"), atomically: true, encoding: .utf8)
         let worker = "[2026-09-29 16:15:02Z INFO JobRunner] Total job steps: 3.\n[2026-09-29 16:15:02Z INFO StepsRunner] Processing step: DisplayName='Checkout'\n"
         try worker.write(to: diag.appendingPathComponent("Worker_20260929-161502-utc.log"), atomically: true, encoding: .utf8)
 
