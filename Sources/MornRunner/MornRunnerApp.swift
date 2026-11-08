@@ -5,6 +5,10 @@ import SwiftUI
 @MainActor
 final class RunnerMonitor: ObservableObject {
     @Published var snapshot = RunnerSnapshot()
+    /// Every discovered runner's latest state, keyed by `RunnerProfile.id`.
+    @Published var snapshots: [String: RunnerSnapshot] = [:]
+    /// Runners the user unchecked for the menu bar. Stored as hidden so newly added runners appear by default.
+    @Published var hiddenInMenuBar = Set(UserDefaults.standard.stringArray(forKey: "menuBarHiddenRunners") ?? [])
     @Published var root: URL
     @Published var isWorking = false
     @Published var isInstalling = false
@@ -28,18 +32,21 @@ final class RunnerMonitor: ObservableObject {
     func refresh() async {
         guard !refreshing else { return }
         refreshing = true
-        let selectedRoot = root
-        let value = await Task.detached(priority: .utility) { LocalRunner.snapshot(root: selectedRoot) }.value
-        if root == selectedRoot { snapshot = value }
+        reloadProfiles()
+        let roots = profiles.map(\.root) + (profiles.contains { $0.root.path == root.path } ? [] : [root])
+        // ponytail: sequential ps/launchctl per runner; share one ps call if many runners make this slow.
+        let values = await Task.detached(priority: .utility) { roots.map { ($0.path, LocalRunner.snapshot(root: $0)) } }.value
+        snapshots = Dictionary(values) { _, new in new }
+        snapshot = snapshots[root.path] ?? RunnerSnapshot()
         loginEnabled = SMAppService.mainApp.status == .enabled
         refreshing = false
     }
 
-    func control(start: Bool) {
+    func control(start: Bool, root target: URL? = nil) {
         guard !isWorking else { return }
         isWorking = true
         error = nil
-        let selectedRoot = root
+        let selectedRoot = target ?? root
         Task {
             do {
                 try await Task.detached { try LocalRunner.control(root: selectedRoot, start: start) }.value
@@ -81,14 +88,19 @@ final class RunnerMonitor: ObservableObject {
     func selectRunner(_ url: URL) {
         root = url.standardizedFileURL
         UserDefaults.standard.set(root.path, forKey: "runnerPath")
-        snapshot = RunnerSnapshot()
+        snapshot = snapshots[root.path] ?? RunnerSnapshot()
         Task { await refresh() }
     }
 
-    func repairService() {
+    func setShownInMenuBar(_ shown: Bool, id: String) {
+        if shown { hiddenInMenuBar.remove(id) } else { hiddenInMenuBar.insert(id) }
+        UserDefaults.standard.set(Array(hiddenInMenuBar), forKey: "menuBarHiddenRunners")
+    }
+
+    func repairService(root target: URL) {
         guard !isWorking, !isInstalling else { return }
         isWorking = true
-        let selectedRoot = root
+        let selectedRoot = target
         Task {
             do {
                 try await Task.detached {
@@ -113,12 +125,12 @@ final class RunnerMonitor: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
 
-    func openGitHub() {
+    func openGitHub(_ snapshot: RunnerSnapshot) {
         guard let url = URL(string: snapshot.githubURL), url.scheme == "https", url.host == "github.com" else { return }
         NSWorkspace.shared.open(url)
     }
 
-    func openLogs() {
+    func openLogs(_ snapshot: RunnerSnapshot, root: URL) {
         if let path = snapshot.logPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
         else { NSWorkspace.shared.open(root.appendingPathComponent("_diag")) }
     }
@@ -168,8 +180,13 @@ struct MornRunnerApp: App {
         MenuBarExtra {
             Dashboard(monitor: monitor, updater: updater)
         } label: {
-            Label("Runner · \(monitor.snapshot.state.title)", systemImage: monitor.snapshot.state.symbol)
-                .accessibilityLabel("MornRunner: \(monitor.snapshot.state.title)")
+            let shown = monitor.profiles.filter { !monitor.hiddenInMenuBar.contains($0.id) }
+            let states = shown.map { monitor.snapshots[$0.id]?.state ?? .unknown }
+            Group {
+                if states.isEmpty { Image(systemName: "desktopcomputer") }
+                else { Image(nsImage: MenuBarIcons.render(states)) }
+            }
+            .accessibilityLabel("MornRunner: " + zip(shown, states).map { "\($0.name) \($1.title)" }.joined(separator: "、"))
         }
         .menuBarExtraStyle(.window)
         Window("MornRunner — セットアップ", id: "setup") {
@@ -205,42 +222,17 @@ struct Dashboard: View {
                 Button { Task { await monitor.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("状態を更新")
             }
-            if !monitor.profiles.isEmpty {
-                Picker("ランナー", selection: Binding(get: { monitor.root.path }, set: { monitor.selectRunner(URL(fileURLWithPath: $0)) })) {
-                    ForEach(monitor.profiles) { profile in Text(profile.name).tag(profile.root.path) }
-                }.disabled(monitor.isWorking || monitor.isInstalling)
-            }
-            HStack(spacing: 12) {
-                Image(systemName: monitor.snapshot.state.symbol)
-                    .font(.system(size: 32)).foregroundStyle(monitor.snapshot.state.color)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(monitor.snapshot.state.title).font(.title2.bold())
-                }
-                Spacer()
-            }
-            if [.busy, .offline, .unknown].contains(monitor.snapshot.state) {
-                Text(monitor.snapshot.detail).font(.callout).textSelection(.enabled)
+            if monitor.profiles.isEmpty {
+                Text(monitor.snapshot.detail).font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if !monitor.snapshot.githubURL.isEmpty {
-                Text(monitor.snapshot.githubURL.replacingOccurrences(of: "https://github.com/", with: ""))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            HStack {
-                Button("起動", systemImage: "play.fill") { monitor.control(start: true) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(monitor.isWorking || monitor.isInstalling || monitor.snapshot.listenerRunning || monitor.snapshot.state == .unknown || monitor.snapshot.state == .notConfigured)
-                Button("停止", systemImage: "stop.fill") { confirmStop() }
-                    .disabled(monitor.isWorking || monitor.isInstalling || !monitor.snapshot.serviceLoaded)
-                if monitor.isWorking { ProgressView().controlSize(.small) }
-                Spacer()
+            ForEach(monitor.profiles) { profile in
+                RunnerRow(monitor: monitor, profile: profile, snapshot: monitor.snapshots[profile.id] ?? RunnerSnapshot()) {
+                    confirmStop(profile)
+                }
             }
             if let error = monitor.error {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
-            }
-            if monitor.snapshot.state == .unknown && !FileManager.default.fileExists(atPath: monitor.root.appendingPathComponent(".service").path) {
-                Button("サービスを設定して起動") { monitor.repairService() }
-                    .disabled(monitor.isWorking || monitor.isInstalling)
             }
             Divider()
             HStack {
@@ -249,15 +241,6 @@ struct Dashboard: View {
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Button("既存を追加…") { monitor.selectFolder() }.disabled(monitor.isWorking || monitor.isInstalling)
-            }
-            HStack {
-                Button("アクティビティ", systemImage: "list.bullet.rectangle") {
-                    openWindow(id: "activity")
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                Button("ログ", systemImage: "doc.text") { monitor.openLogs() }
-                Button("GitHub", systemImage: "arrow.up.right.square") { monitor.openGitHub() }
-                    .disabled(monitor.snapshot.githubURL.isEmpty)
             }
             Toggle("ログイン時に起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
                 .toggleStyle(.switch).controlSize(.small)
@@ -270,15 +253,15 @@ struct Dashboard: View {
                 Button("アプリを終了") { NSApp.terminate(nil) }.disabled(monitor.isInstalling || updater.isWorking)
             }
         }
-        .padding(20).frame(width: 370)
+        .padding(20).frame(width: 420)
     }
 
     /// A sheet inside the menu bar popover cannot take key focus in an accessory app, so its buttons never respond.
     /// Present a standalone modal alert instead.
-    func confirmStop() {
+    func confirmStop(_ profile: RunnerProfile) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "ランナーを停止しますか？"
+        alert.messageText = "\(profile.name) を停止しますか？"
         alert.informativeText = "実行中のジョブは中断されます。"
         alert.alertStyle = .warning
         let stop = alert.addButton(withTitle: "停止")
@@ -286,6 +269,81 @@ struct Dashboard: View {
         stop.keyEquivalent = ""
         let cancel = alert.addButton(withTitle: "キャンセル")
         cancel.keyEquivalent = "\r"
-        if alert.runModal() == .alertFirstButtonReturn { monitor.control(start: false) }
+        if alert.runModal() == .alertFirstButtonReturn { monitor.control(start: false, root: profile.root) }
+    }
+}
+
+struct RunnerRow: View {
+    @ObservedObject var monitor: RunnerMonitor
+    let profile: RunnerProfile
+    let snapshot: RunnerSnapshot
+    let confirmStop: () -> Void
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        let busy = monitor.isWorking || monitor.isInstalling
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: snapshot.state.symbol)
+                .font(.title2).foregroundStyle(snapshot.state.color).frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(profile.name).font(.headline).lineLimit(1)
+                    Spacer()
+                    Text(snapshot.state.title).font(.caption.bold()).foregroundStyle(snapshot.state.color)
+                }
+                if !snapshot.githubURL.isEmpty {
+                    Text(snapshot.githubURL.replacingOccurrences(of: "https://github.com/", with: ""))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if [.busy, .offline, .unknown].contains(snapshot.state) {
+                    Text(snapshot.detail).font(.caption).lineLimit(2).textSelection(.enabled)
+                }
+                HStack(spacing: 6) {
+                    Button { monitor.control(start: true, root: profile.root) } label: { Image(systemName: "play.fill") }
+                        .help("起動")
+                        .disabled(busy || snapshot.listenerRunning || snapshot.state == .unknown || snapshot.state == .notConfigured)
+                    Button(action: confirmStop) { Image(systemName: "stop.fill") }
+                        .help("停止")
+                        .disabled(busy || !snapshot.serviceLoaded)
+                    Button {
+                        monitor.selectRunner(profile.root)
+                        openWindow(id: "activity")
+                        NSApp.activate(ignoringOtherApps: true)
+                    } label: { Image(systemName: "list.bullet.rectangle") }.help("アクティビティ")
+                    Button { monitor.openLogs(snapshot, root: profile.root) } label: { Image(systemName: "doc.text") }.help("ログ")
+                    Button { monitor.openGitHub(snapshot) } label: { Image(systemName: "arrow.up.right.square") }
+                        .help("GitHub").disabled(snapshot.githubURL.isEmpty)
+                    Spacer()
+                    Toggle("メニューバー", isOn: Binding(
+                        get: { !monitor.hiddenInMenuBar.contains(profile.id) },
+                        set: { monitor.setShownInMenuBar($0, id: profile.id) }
+                    )).toggleStyle(.checkbox).font(.caption)
+                }
+                .controlSize(.small)
+                if snapshot.state == .unknown && !FileManager.default.fileExists(atPath: profile.root.appendingPathComponent(".service").path) {
+                    Button("サービスを設定して起動") { monitor.repairService(root: profile.root) }
+                        .controlSize(.small).disabled(busy)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.12)))
+    }
+}
+
+/// The menu bar label is a single image, so the checked runners' colored state icons are drawn side by side into one.
+enum MenuBarIcons {
+    @MainActor static func render(_ states: [RunnerState]) -> NSImage {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let content = HStack(spacing: 3) {
+            ForEach(Array(states.enumerated()), id: \.offset) { _, state in
+                Image(systemName: state.symbol).foregroundStyle(state.color)
+            }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .environment(\.colorScheme, dark ? .dark : .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        return renderer.nsImage ?? NSImage()
     }
 }
