@@ -1,118 +1,136 @@
 # MornRunner
 
-GitHub Actions の self-hosted ランナーを **セットアップして、メニューバーから管理する** macOS アプリです。
-macOS 14 以降、Apple Silicon / Intel 両対応。特定の Organization やリポジトリに依存しません。
+GitHub Actions の self-hosted ランナーを、Mac のメニューバーから**作って・見て・止める**アプリです。
+
+- ターミナルを開かずに、新しいランナーを登録してサービスとして常駐させられます
+- 登録済みのランナーを自動で見つけ、全部の状態を一覧で表示します
+- 選んだランナーの状態アイコンをメニューバーに並べておけます
+
+macOS 14 以降、Apple Silicon / Intel 両対応。github.com の Organization・リポジトリのどちらにも使えます。
 
 ## インストール
-
-Homebrew からインストールできます。
 
 ```sh
 brew install --cask tsukumistudio/tap/mornrunner
 ```
 
-ZIP 版は `MornRunner.app` を `~/Applications` または `/Applications` にコピーして開きます。
-配布用 ZIP は Developer ID 署名・Apple 公証済みです。
+Homebrew を使わない場合は [Releases](https://github.com/TsukumiStudio/MornRunner/releases/latest) から `MornRunner.app.zip` をダウンロードし、展開した `MornRunner.app` を `/Applications` に置いて開きます（Developer ID 署名・Apple 公証済み）。
 
-## ランナーを新しく設定する
+起動するとメニューバーにアイコンが出ます。Dock には出ません。
 
-1. メニューバーから「新規設定」を開きます。
-2. GitHub の Organization またはリポジトリの URL を入力します。`owner` / `owner/repository` の形式でも指定できます。
-3. ランナー名、必要なら追加ラベルと保存先を設定します。
-4. 「GitHub で取得」から Configure 欄の `--token` の値をコピーします。GitHub CLI がログイン済みなら「CLI で取得」も使えます。
-5. 「登録して起動」を押します。
+## はじめてランナーを作る
 
-この Mac の CPU に合った公式ランナーをダウンロードし、SHA-256 検証、GitHub への登録、ログイン時に起動するサービスの設定、起動・接続確認まで進めます。完了画面から `runs-on` の設定例をコピーできます。
+用意するもの: 登録先の Organization またはリポジトリの**管理者権限**。
 
-GitHub 側で登録先の管理権限が必要です。登録トークンの有効期限は 1 時間。入力したトークンはアプリの設定に保存せず、登録プロセスに環境変数で渡します。GitHub CLI の権限変更は自動では行いません。
-登録先は **github.com の Organization／リポジトリ** に対応しています。GitHub Enterprise Server、Linux、Windows のセットアップは対象外です。
+1. メニューバーのアイコン →「新規設定」
+2. 登録先を入力（`https://github.com/owner/repo`、`owner/repo`、`owner` のどれでも可）
+3. ランナー名を決める。必要ならラベルと保存先も
+4. 登録トークンを入れる
+   - 「GitHub で取得」で開くページの Configure 欄から、`--token` の後ろの値をコピー
+   - GitHub CLI (`gh`) にログイン済みなら「CLI で取得」で自動入力
+5. 「登録して起動」
 
-既存フォルダや同名の登録済みランナーは上書きしません。途中で失敗した場合は、同じ登録先・名前・ラベル・保存先で再試行できます。GitHub 登録後にサービス設定が失敗した場合も、登録済みランナーを追加し「サービスを設定して起動」で再開できます。
+あとは自動で進みます: 公式ランナーのダウンロードと SHA-256 検証 → GitHub への登録 → ログイン時に起動するサービスの設定 → 接続確認。
+完了画面からワークフローに書く `runs-on` の例をコピーできます。
 
-## 既存ランナーの管理
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64]
+```
 
-- `~/actions-runner` とユーザーの LaunchAgents にある公式ランナーを検出します。
-- 「既存を追加…」で別のフォルダも追加できます。
-- 検出したすべてのランナーを一覧に並べ、停止中 / 接続中 / 待機中 / ジョブ実行中 / 接続エラーを 5 秒ごとに更新します。新しく登録したランナーも自動で一覧に加わります。
-- ランナーごとに起動・停止、アクティビティ・診断ログ・GitHub ページの表示ができます。
-- 「メニューバー」にチェックしたランナーの状態アイコンを、メニューバーに横並びで表示します。
-- 「ログイン時に起動」は監視アプリの自動起動です。ランナー自身のサービス設定とは別です。
-- 監視アプリを終了・更新しても、ランナーは動き続けます。
+- 登録トークンの有効期限は 1 時間です。トークンはアプリに保存しません
+- 既存のフォルダや同名のランナーは上書きしません。途中で失敗しても、同じ内容でもう一度押せば続きから再開します
 
-状態はプロセスの生存と現在の起動以降の診断ログからローカルで判定します。GitHub API によるオンライン確認ではないため、切断がログに出るまでは表示が遅れる場合があります。ログ末尾 512 KiB に状態イベントがない場合は接続確認中と表示します。接続エラーの後 5 分間エラーが記録されなければ、復帰したものとして待機中に戻します（スリープ復帰時など、ランナーが再接続をログに残さない場合があるためです）。Mac のスリープ中やログアウト中は監視できません。
+## すでにあるランナーを使う
 
-## アクティビティを見る
+`~/actions-runner` と、`~/Library/LaunchAgents` に登録された公式ランナーは自動で一覧に出ます。
+それ以外の場所にあるランナーは「既存を追加…」でフォルダ（`.runner` があるフォルダ）を選びます。
 
-ランナーのアクティビティボタンで、そのランナーの様子を 1 つのウィンドウにまとめて表示します。
+サービス未設定のランナーには「サービスを設定して起動」ボタンが出ます。
 
-- 現在の状態と、実行中ジョブの名前・経過時間・ステップ進捗
-- 直近のジョブ履歴（開始時刻、所要時間、成功／失敗）
-- 接続エラー・再接続・ランナー起動と、Mac のスリープ／スリープ解除のタイムライン（直近 14 日）
-- ランナーの診断ログの末尾。「要点のみ」で状態の変化だけを表示し、ジョブ実行中は Worker ログにも切り替えられます
+## 毎日の使い方
 
-いずれも `_diag` フォルダのログと `pmset -g log` をローカルで読んで組み立てています。2 秒ごとに更新します。
+### 一覧
 
-## アプリを更新する
+メニューバーのアイコンをクリックすると、全ランナーがカードで並びます。状態は 5 秒ごとに更新されます。
 
-メニューバーの「最新を確認」→「最新へ更新」→「再起動して適用」で更新できます。
+| 表示 | 意味 |
+| --- | --- |
+| 🟢 待機中 | ジョブを待っている |
+| 🔵 ジョブ実行中 | ジョブを実行している（ジョブ名も表示） |
+| 🟠 接続中 | 起動直後、または GitHub との接続を確認中 |
+| 🔴 接続エラー | GitHub と通信できていない |
+| ⚪ 停止中 | ランナーが止まっている |
 
-- `/Applications` にある Homebrew 管理版は `brew update` / `brew upgrade --cask tsukumistudio/tap/mornrunner` を使用します。
-- ZIP 版は公開 Release の ZIP をダウンロードし、SHA-256、Bundle ID、バージョン、同じ Developer ID チームの署名、Apple 公証を確認してから差し替えます。保存先に書き込み権限が必要です。
-- 未公開・通信エラー・更新配信前などの場合は理由を表示し、再確認できます。
-- 更新するのは MornRunner アプリです。GitHub Actions ランナー本体は公式ランナーの自動更新に従います。
+各カードのボタン: 起動 / 停止 / アクティビティ / ログ / GitHub ページ。
+
+### メニューバー
+
+カードの「メニューバー」にチェックしたランナーの状態アイコンが、メニューバーに横並びで出ます。新しく追加したランナーは最初からチェックが入っています。
+
+### アクティビティ
+
+カードのアクティビティボタンで、そのランナーの詳細ウィンドウが開きます。
+
+- 実行中ジョブのステップ進捗と経過時間
+- 直近のジョブ履歴（成功／失敗・所要時間）
+- 接続エラーや Mac のスリープのタイムライン（直近 14 日）
+- 診断ログの末尾（「要点のみ」で状態の変化だけに絞れます）
+
+## 更新・アンインストール
+
+アプリ内の「最新を確認」→「最新へ更新」→「再起動して適用」で更新できます。Homebrew なら次でも同じです。
 
 ```sh
 brew update
 brew upgrade --cask tsukumistudio/tap/mornrunner
 ```
 
-アンインストールは `brew uninstall --cask mornrunner`。ランナーの登録・作業データ・サービスはアプリのアンインストールでは削除しません。
+アンインストール:
 
-## ビルド・検証
+```sh
+brew uninstall --cask mornrunner
+```
 
-Swift 6 以降の Xcode / Command Line Tools を使用します。
+アプリを終了・更新・アンインストールしても**ランナー自体は動き続けます**。ランナーの登録やサービスは削除しません。
+
+## よくある質問
+
+**Mac を再起動したらランナーは動く？**
+動きます。ランナーはサービスとして登録されるので、ログインすれば自動で起動します。アプリの「ログイン時に起動」は、このアプリ（監視画面）の自動起動の設定で、ランナーとは別です。
+
+**状態はどうやって判定している？**
+ランナーのプロセスと、`_diag` フォルダの診断ログを手元で読んでいます。GitHub API は使いません。そのため切断がログに出るまで表示が遅れることがあります。接続エラーの後 5 分間エラーが出なければ、復帰したとみなして待機中に戻します。
+
+**対応していないものは？**
+GitHub Enterprise Server、Linux・Windows 上のランナーのセットアップ。Mac がスリープ中・ログアウト中の監視。
+
+## 開発
+
+Swift 6 以降の Xcode または Command Line Tools が必要です。
 
 ```sh
 swift test
-zsh build.sh
-UNIVERSAL=1 zsh build.sh
-open dist/MornRunner.app
-# UI と同じ読み取り専用の状態確認
-dist/MornRunner.app/Contents/MacOS/MornRunner --status
+zsh build.sh                 # dist/MornRunner.app（ad-hoc 署名）
+UNIVERSAL=1 zsh build.sh     # Universal ビルド
+dist/MornRunner.app/Contents/MacOS/MornRunner --status   # 状態を JSON で出力
 ```
 
-出力は `dist/MornRunner.app` と `dist/MornRunner.app.zip`。通常ビルドは ad-hoc 署名です。
+古い Command Line Tools で失敗する場合は `bash Support/with-local-toolchain.sh swift test` を使います（システムのツールは変更しません）。
+`MORN_RUN_SERVICE_TEST=1` を付けると、一時 LaunchAgent の起動・停止も検証します（実ランナーには触れません）。
 
-古い Command Line Tools の private interface や SwiftBridging 定義が残っている環境では、次の補助スクリプトを使用できます。システムの開発ツールを変更せず、`.build` 内のコピーと仮想ファイルシステムで回避します。
+| ファイル | 役割 |
+| --- | --- |
+| `MornRunnerApp.swift` | メニューバー・ランナー一覧 |
+| `SetupView.swift` / `RunnerSetup.swift` | セットアップ画面と導入処理 |
+| `RunnerProfiles.swift` / `RunnerStatus.swift` | ランナーの検出・状態判定・起動停止 |
+| `ActivityView.swift` / `RunnerActivity.swift` | アクティビティ画面とログ解析 |
+| `Updater.swift` | Homebrew / ZIP 版の更新 |
 
-```sh
-bash Support/with-local-toolchain.sh swift test
-UNIVERSAL=1 bash Support/with-local-toolchain.sh zsh build.sh
-# ログイン済み Mac で一時 LaunchAgent の起動・停止も検証（実ランナーには触れません）
-MORN_RUN_SERVICE_TEST=1 bash Support/with-local-toolchain.sh swift test
-```
+### リリース
 
-## 署名・リリース・Homebrew
+`Support/Info.plist` のバージョンを上げて `v*` タグを push すると、GitHub Actions がテスト → Universal ビルド → MornNotary（非公開）で署名・公証 → Release 公開 → `TsukumiStudio/homebrew-tap` の Cask 更新まで行います。
+必要な設定: Secrets `MORN_NOTARY_TOKEN`・`HOMEBREW_TAP_TOKEN`、Variable `MORN_RELEASE_AUTOMATION=true`。
 
-MornDesktopTube と同じ SwiftUI / Swift Package / `.app` 構成で、`matsufriends/MornNotary` による署名・公証を使用します。
-
-```sh
-bash /path/to/MornNotary/sign.sh dist/MornRunner.app
-```
-
-`dist/MornRunner-signed.zip` が生成されます。GitHub Release に載せる際のファイル名は **MornRunner.app.zip** です。
-
-タグからの自動リリースは初期状態では無効です。リポジトリの Actions Secrets に `MORN_NOTARY_TOKEN` と `HOMEBREW_TAP_TOKEN`、Actions Variable に `MORN_RELEASE_AUTOMATION=true` を設定すると、`v0.2.0` などのタグを push すると、テスト → Universal ビルド → 署名・公証 → Release 公開 → `TsukumiStudio/homebrew-tap` の `Casks/mornrunner.rb` 更新を行います。手動実行は成果物の生成・Tap への書き込み権限確認までです。
-
-`Support/mornrunner.rb.in` にバージョンと公開 ZIP の SHA-256 を反映して Cask を生成します。公開 Release が存在するまでアプリの「最新を確認」は未公開と表示します。
-
-## 構成
-
-- `MornRunnerApp.swift`: メニューバー・複数ランナーの切り替え
-- `SetupView.swift` / `RunnerSetup.swift`: セットアップ画面・導入処理
-- `RunnerProfiles.swift` / `RunnerStatus.swift`: 既存ランナーの検出・監視・サービス操作
-- `Updater.swift`: Homebrew / ZIP 版の更新
-- `Tests`: 登録先・上書き防止・SHA-256・更新状態・サービスの検証
-- `build.sh` / `.github/workflows/release.yml`: アプリ生成・配布
-
-参考: [GitHub のランナー追加手順](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners)、[Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook)。
+参考: [GitHub のランナー追加手順](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners)
