@@ -15,6 +15,12 @@ final class RunnerMonitor: ObservableObject {
     @Published var profiles: [RunnerProfile] = []
     @Published var error: String?
     @Published var loginEnabled = SMAppService.mainApp.status == .enabled
+    @Published var autoRestart = UserDefaults.standard.bool(forKey: "autoRestartStuckRunners") {
+        didSet { UserDefaults.standard.set(autoRestart, forKey: "autoRestartStuckRunners") }
+    }
+    @Published var notice: String?
+    private var lastStuckCheck = Date.distantPast
+    private var lastRestart: [String: Date] = [:]
     private var refreshing = false
     private var timer: Timer?
 
@@ -39,7 +45,36 @@ final class RunnerMonitor: ObservableObject {
         snapshots = Dictionary(values) { _, new in new }
         snapshot = snapshots[root.path] ?? RunnerSnapshot()
         loginEnabled = SMAppService.mainApp.status == .enabled
+        if autoRestart, Date().timeIntervalSince(lastStuckCheck) >= StuckWatch.checkInterval {
+            lastStuckCheck = Date()
+            await restartStuckRunners()
+        }
         refreshing = false
+    }
+
+    private func restartStuckRunners() async {
+        let now = Date()
+        let candidates = profiles.compactMap { profile -> (URL, String, String)? in
+            guard let snapshot = snapshots[profile.id], snapshot.state == .idle,
+                  now.timeIntervalSince(lastRestart[profile.id] ?? .distantPast) >= StuckWatch.cooldown else { return nil }
+            return (profile.root, snapshot.name, snapshot.githubURL)
+        }
+        for (root, name, url) in candidates {
+            do {
+                let restarted = try await Task.detached(priority: .utility) { () throws -> Bool in
+                    // Re-read the local state so a job that arrived during the API calls is not killed.
+                    guard try StuckWatch.check(name: name, githubURL: url), LocalRunner.snapshot(root: root).state == .idle else { return false }
+                    try StuckWatch.restart(root: root)
+                    return true
+                }.value
+                if restarted {
+                    lastRestart[root.path] = now
+                    notice = "\(name) がキュー待ちのジョブを受け取らないため再起動しました（\(now.formatted(date: .omitted, time: .shortened))）"
+                }
+            } catch {
+                notice = "\(name) の詰まり確認に失敗しました: \(error.localizedDescription)"
+            }
+        }
     }
 
     func control(start: Bool, root target: URL? = nil) {
@@ -244,6 +279,12 @@ struct Dashboard: View {
             }
             Toggle("ログイン時に起動", isOn: Binding(get: { monitor.loginEnabled }, set: { monitor.setLogin($0) }))
                 .toggleStyle(.switch).controlSize(.small)
+            Toggle("ジョブを受け取らないランナーを自動で再起動", isOn: $monitor.autoRestart)
+                .toggleStyle(.switch).controlSize(.small)
+                .help("合うジョブが 10 分以上キュー待ちなのに待機中のままのランナーを再起動します（GitHub CLI を使用、同じランナーは 30 分に 1 回まで）")
+            if let notice = monitor.notice {
+                Text(notice).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             Divider()
             UpdateControls(updater: updater).disabled(monitor.isWorking || monitor.isInstalling)
             HStack {
