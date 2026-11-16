@@ -97,3 +97,27 @@ struct RunnerStatusTests {
         #expect(LocalRunner.snapshot(root: root).state == .stopped)
     }
 }
+
+struct StuckWatchTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let labels = ["self-hosted", "macOS", "ARM64", "kimekyawa-mac-mini"]
+
+    @Test func testLongQueuedMatchingJobOnIdleRunnerIsStuck() {
+        let job = StuckWatch.QueuedJob(labels: ["self-hosted", "Kimekyawa-Mac-Mini"], createdAt: now.addingTimeInterval(-StuckWatch.queuedLimit))
+        #expect(StuckWatch.isStuck(runnerLabels: labels, busyOnGitHub: false, jobs: [job], now: now))
+        #expect(!StuckWatch.isStuck(runnerLabels: labels, busyOnGitHub: true, jobs: [job], now: now))
+    }
+
+    @Test func testFreshOrForeignJobsAreNotStuck() {
+        let fresh = StuckWatch.QueuedJob(labels: ["self-hosted"], createdAt: now.addingTimeInterval(-60))
+        let otherRunner = StuckWatch.QueuedJob(labels: ["self-hosted", "kimekyawa-book-air"], createdAt: now.addingTimeInterval(-3600))
+        let hosted = StuckWatch.QueuedJob(labels: ["ubuntu-latest"], createdAt: now.addingTimeInterval(-3600))
+        let unlabeled = StuckWatch.QueuedJob(labels: [], createdAt: now.addingTimeInterval(-3600))
+        #expect(!StuckWatch.isStuck(runnerLabels: labels, busyOnGitHub: false, jobs: [fresh, otherRunner, hosted, unlabeled], now: now))
+    }
+
+    @Test func testOnlyRepositoryRunnersAreWatched() {
+        #expect(StuckWatch.repository(of: "https://github.com/TsukumiStudio/KimekyawaGodot") == "TsukumiStudio/KimekyawaGodot")
+        #expect(StuckWatch.repository(of: "https://github.com/TsukumiStudio") == nil)
+    }
+}
