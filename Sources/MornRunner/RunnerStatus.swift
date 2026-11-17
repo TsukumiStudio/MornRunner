@@ -50,37 +50,9 @@ enum LogStatus {
     static let recoveryGrace: TimeInterval = 300
 
     static func parse(_ log: String, now: Date = Date()) -> (RunnerState, String) {
-        var state: RunnerState = .connecting
-        var detail = "GitHub への接続を確認しています"
-        var lastError: Date?
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss'Z'"
-        for line in log.components(separatedBy: .newlines) {
-            if line.contains(" ERR ") || line.contains("connect error:"), line.hasPrefix("["),
-               let date = formatter.date(from: String(line.dropFirst().prefix(20))) {
-                lastError = date
-            }
-            // Terminal messages describe the runner lifecycle; a job's failure is not a connection failure.
-            if line.contains("Listening for Jobs") {
-                state = .idle; detail = "ジョブを受け付けています"
-            } else if let range = line.range(of: "Running job: ") {
-                state = .busy; detail = String(line[range.upperBound...])
-            } else if line.contains("Job ") && line.contains(" completed with result:") {
-                state = .idle; detail = "前回のジョブ: " + String(line.components(separatedBy: "completed with result:").last ?? "").trimmingCharacters(in: .whitespaces)
-            } else if line.contains("Runner connect error:") || line.contains("Failed to create session") || line.contains("MessageListener]") && line.contains("ERR ") {
-                state = .offline; detail = "GitHub との通信に失敗しています。ログを確認してください"
-            } else if line.contains("Runner reconnected.") {
-                state = .idle; detail = "GitHub に再接続しました"
-            } else if line.contains("exiting") && line.contains("Listener]") {
-                state = .connecting; detail = "ランナーの再接続を待っています"
-            }
-        }
-        if state == .offline, let lastError, now.timeIntervalSince(lastError) > recoveryGrace {
-            state = .idle; detail = "接続エラーから復帰しました"
-        }
-        return (state, detail)
+        var scan = LogScan()
+        scan.consume(log)
+        return scan.resolved(now: now)
     }
 
     static func date(of filename: String) -> Date? {
@@ -105,6 +77,72 @@ enum LogStatus {
 
     /// Whether a Runner_ log was written by the listener's `run` command rather than a one-shot invocation like `--version`.
     static func isRunLog(_ head: String) -> Bool { head.contains("Command 'run': 'True'") }
+}
+
+/// The last lifecycle line wins, so a scan can continue across refreshes with only the newly appended lines.
+struct LogScan {
+    var state: RunnerState = .connecting
+    var detail = "GitHub への接続を確認しています"
+    var lastError: Date?
+
+    mutating func consume(_ log: String) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss'Z'"
+        for line in log.components(separatedBy: .newlines) {
+            if line.contains(" ERR ") || line.contains("connect error:"), line.hasPrefix("["),
+               let date = formatter.date(from: String(line.dropFirst().prefix(20))) {
+                lastError = date
+            }
+            // Terminal messages describe the runner lifecycle; a job's failure is not a connection failure.
+            if line.contains("Listening for Jobs") {
+                state = .idle; detail = "ジョブを受け付けています"
+            } else if let range = line.range(of: "Running job: ") {
+                state = .busy; detail = String(line[range.upperBound...])
+            } else if line.contains("Job ") && line.contains(" completed with result:") {
+                state = .idle; detail = "前回のジョブ: " + String(line.components(separatedBy: "completed with result:").last ?? "").trimmingCharacters(in: .whitespaces)
+            } else if line.contains("Runner connect error:") || line.contains("Failed to create session") || line.contains("MessageListener]") && line.contains("ERR ") {
+                state = .offline; detail = "GitHub との通信に失敗しています。ログを確認してください"
+            } else if line.contains("Runner reconnected.") {
+                state = .idle; detail = "GitHub に再接続しました"
+            } else if line.contains("exiting") && line.contains("Listener]") {
+                state = .connecting; detail = "ランナーの再接続を待っています"
+            }
+        }
+    }
+
+    /// Recovery depends on the current time, so it is applied on every refresh rather than stored.
+    func resolved(now: Date = Date()) -> (RunnerState, String) {
+        if state == .offline, let lastError, now.timeIntervalSince(lastError) > LogStatus.recoveryGrace {
+            return (.idle, "接続エラーから復帰しました")
+        }
+        return (state, detail)
+    }
+}
+
+/// Remembers how far each listener log was scanned so a refresh reads only the bytes appended since.
+enum LogCache {
+    private static let lock = NSLock()
+    private static var entries: [String: (offset: UInt64, scan: LogScan)] = [:]
+
+    static func scan(_ url: URL, window: UInt64 = 524_288) throws -> LogScan {
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        let size = try file.seekToEnd()
+        var entry = lock.withLock { entries[url.path] }
+        if entry == nil || entry!.offset > size { entry = (size > window ? size - window : 0, LogScan()) }
+        guard var (offset, scan) = entry else { return LogScan() }
+        try file.seek(toOffset: offset)
+        let data = try file.readToEnd() ?? Data()
+        // A line still being written is left for the next refresh.
+        if let end = data.lastIndex(of: UInt8(ascii: "\n")) {
+            scan.consume(String(decoding: data[..<end], as: UTF8.self))
+            offset += UInt64(end - data.startIndex + 1)
+        }
+        lock.withLock { entries[url.path] = (offset, scan) }
+        return scan
+    }
 }
 
 struct CommandResult {
@@ -223,7 +261,7 @@ enum LocalRunner {
             }
             let latest = diag.appendingPathComponent(name)
             result.logPath = latest.path
-            let parsed = LogStatus.parse(try tail(latest))
+            let parsed = try LogCache.scan(latest).resolved()
             result.state = parsed.0
             result.detail = parsed.1
         } catch {

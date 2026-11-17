@@ -68,6 +68,26 @@ struct RunnerStatusTests {
         #expect(try LocalRunner.tail(file, bytes: 18) == "Listening for Jobs")
     }
 
+    @Test func testIncrementalLogScan() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        func append(_ text: String) throws {
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(text.utf8))
+            try handle.close()
+        }
+        try Data("Listening for Jobs\n".utf8).write(to: file)
+        #expect(try LogCache.scan(file).state == .idle)
+        try append("Running job: Build\nJob Build completed")
+        #expect(try LogCache.scan(file).detail == "Build")
+        try append(" with result: Failed\n")
+        #expect(try LogCache.scan(file).detail == "前回のジョブ: Failed")
+        // A replaced, shorter file is scanned from scratch.
+        try Data("Runner connect error: x\n".utf8).write(to: file)
+        #expect(try LogCache.scan(file).state == .offline)
+    }
+
     // Explicitly enabled on a logged-in Mac. Uses its own disposable service, never the real runner.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["MORN_RUN_SERVICE_TEST"] == "1"))
     func testServiceStartStop() throws {
