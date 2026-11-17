@@ -22,7 +22,10 @@ final class RunnerMonitor: ObservableObject {
     private var lastStuckCheck = Date.distantPast
     private var lastRestart: [String: Date] = [:]
     private var refreshing = false
+    private var lastRefresh = Date.distantPast
     private var timer: Timer?
+    /// Polling while nothing is on screen only keeps the menu bar icon current, so it can be slower.
+    static let backgroundInterval: TimeInterval = 30
 
     init() {
         let path = UserDefaults.standard.string(forKey: "runnerPath")
@@ -30,7 +33,10 @@ final class RunnerMonitor: ObservableObject {
         reloadProfiles()
         if !profiles.contains(where: { $0.root == root }), let first = profiles.first { root = first.root }
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+            Task { @MainActor in
+                guard let self else { return }
+                if Self.windowShown || Date().timeIntervalSince(self.lastRefresh) >= Self.backgroundInterval { await self.refresh() }
+            }
         }
         Task { await refresh() }
     }
@@ -38,6 +44,7 @@ final class RunnerMonitor: ObservableObject {
     func refresh() async {
         guard !refreshing else { return }
         refreshing = true
+        lastRefresh = Date()
         reloadProfiles()
         let roots = profiles.map(\.root) + (profiles.contains { $0.root.path == root.path } ? [] : [root])
         let values = await Task.detached(priority: .utility) {
@@ -52,6 +59,11 @@ final class RunnerMonitor: ObservableObject {
             await restartStuckRunners()
         }
         refreshing = false
+    }
+
+    /// The menu bar popover, activity, and setup windows; the status item itself is an NSStatusBarWindow.
+    private static var windowShown: Bool {
+        NSApp.windows.contains { $0.isVisible && $0.occlusionState.contains(.visible) && !($0.className.contains("StatusBar")) }
     }
 
     private func restartStuckRunners() async {
