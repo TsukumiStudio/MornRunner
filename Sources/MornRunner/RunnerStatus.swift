@@ -215,7 +215,14 @@ enum LocalRunner {
         return String(decoding: try file.readToEnd() ?? Data(), as: UTF8.self)
     }
 
-    static func snapshot(root: URL) -> RunnerSnapshot {
+    /// One `ps` serves every runner in a refresh; pass it to `snapshot(root:processes:)`.
+    static func processList() throws -> String {
+        let processes = try command("/bin/ps", ["-axo", "lstart=,command="])
+        guard processes.status == 0 else { throw RunnerError.message("プロセスを確認できません") }
+        return processes.output
+    }
+
+    static func snapshot(root: URL, processes: String? = nil) -> RunnerSnapshot {
         var result = RunnerSnapshot()
         guard FileManager.default.fileExists(atPath: root.appendingPathComponent(".runner").path) else {
             result.state = .notConfigured
@@ -231,10 +238,9 @@ enum LocalRunner {
             let svc = try service(root: root)
             let launch = try command("/bin/launchctl", ["print", "gui/\(getuid())/\(svc.label)"])
             result.serviceLoaded = launch.status == 0
-            let processes = try command("/bin/ps", ["-axo", "lstart=,command="])
-            guard processes.status == 0 else { throw RunnerError.message("プロセスを確認できません") }
+            let psOutput = try processes ?? processList()
             let listener = root.appendingPathComponent("bin/Runner.Listener").path + " run"
-            let processLine = processes.output.components(separatedBy: .newlines).first { line in
+            let processLine = psOutput.components(separatedBy: .newlines).first { line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 guard trimmed.count > 25 else { return false }
                 let command = String(trimmed.dropFirst(25)).trimmingCharacters(in: .whitespaces)

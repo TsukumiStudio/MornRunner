@@ -40,8 +40,10 @@ final class RunnerMonitor: ObservableObject {
         refreshing = true
         reloadProfiles()
         let roots = profiles.map(\.root) + (profiles.contains { $0.root.path == root.path } ? [] : [root])
-        // ponytail: sequential ps/launchctl per runner; share one ps call if many runners make this slow.
-        let values = await Task.detached(priority: .utility) { roots.map { ($0.path, LocalRunner.snapshot(root: $0)) } }.value
+        let values = await Task.detached(priority: .utility) {
+            let processes = try? LocalRunner.processList()
+            return roots.map { ($0.path, LocalRunner.snapshot(root: $0, processes: processes)) }
+        }.value
         snapshots = Dictionary(values) { _, new in new }
         snapshot = snapshots[root.path] ?? RunnerSnapshot()
         loginEnabled = SMAppService.mainApp.status == .enabled
