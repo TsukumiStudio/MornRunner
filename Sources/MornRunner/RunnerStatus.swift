@@ -130,9 +130,8 @@ enum LogCache {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
         let size = try file.seekToEnd()
-        var entry = lock.withLock { entries[url.path] }
-        if entry == nil || entry!.offset > size { entry = (size > window ? size - window : 0, LogScan()) }
-        guard var (offset, scan) = entry else { return LogScan() }
+        var (offset, scan) = lock.withLock { entries[url.path] } ?? (.max, LogScan())
+        if offset > size { (offset, scan) = (size > window ? size - window : 0, LogScan()) }
         try file.seek(toOffset: offset)
         let data = try file.readToEnd() ?? Data()
         // A line still being written is left for the next refresh.
@@ -215,7 +214,7 @@ enum LocalRunner {
         return String(decoding: try file.readToEnd() ?? Data(), as: UTF8.self)
     }
 
-    /// One `ps` serves every runner in a refresh; pass it to `snapshot(root:processes:)`.
+    /// One `ps` serves every runner in a refresh.
     static func processList() throws -> String {
         let processes = try command("/bin/ps", ["-axo", "lstart=,command="])
         guard processes.status == 0 else { throw RunnerError.message("プロセスを確認できません") }
