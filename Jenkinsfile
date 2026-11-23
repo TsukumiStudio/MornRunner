@@ -31,6 +31,7 @@ pipeline {
           test "$(lipo -archs "$app/Contents/MacOS/MornRunner" | tr ' ' '\\n' | sort | xargs)" = "arm64 x86_64"
           codesign --verify --strict -vv "$app"
           test -s "$app/Contents/Resources/AppIcon.icns"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = studio.tsukumi.MornRunner
         '''
         archiveArtifacts artifacts: 'dist/MornRunner.app.zip', fingerprint: true
       }
