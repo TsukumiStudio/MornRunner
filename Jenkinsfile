@@ -119,7 +119,7 @@ pipeline {
                 mkdir -p tap/Casks
                 sed -e "s/@VERSION@/${VERSION}/g" -e "s/@SHA256@/${sha}/g" Support/mornrunner.rb.in > tap/Casks/mornrunner.rb
                 ruby -c tap/Casks/mornrunner.rb
-                git -C tap diff --stat
+                git -C tap diff
                 if [ "$DRY_RUN" = true ]; then
                   echo 'DRY RUN: 上の差分を TsukumiStudio/homebrew-tap の main に push する'
                   exit 0
