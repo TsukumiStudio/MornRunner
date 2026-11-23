@@ -54,20 +54,54 @@ pipeline {
         VERSION = "${env.TAG_NAME.substring(1)}"
       }
       stages {
-        stage('Sign') {
+        // MornNotary の sign.sh が段階呼び出し (request/wait/fetch) に対応していなければ、Request で一括して行う
+        stage('Sign: Request') {
           steps {
             script {
               if (env.DRY_RUN == 'true') {
-                echo 'DRY RUN: matsufriends/MornNotary の sign.sh で dist/MornRunner.app を署名・公証する'
+                echo 'DRY RUN: matsufriends/MornNotary に dist/MornRunner.app の署名・公証を依頼する'
                 return
               }
               withCredentials([string(credentialsId: 'morn-notary-token', variable: 'GH_TOKEN')]) {
                 sh '''
-                  notary=$(mktemp -d)
-                  trap 'rm -rf "$notary"' EXIT
-                  gh repo clone matsufriends/MornNotary "$notary/MornNotary" -- --depth 1
-                  bash "$notary/MornNotary/sign.sh" dist/MornRunner.app
+                  rm -rf notary
+                  mkdir -p notary/state
+                  gh repo clone matsufriends/MornNotary notary/MornNotary -- --depth 1
+                  if grep -q '^  request)' notary/MornNotary/sign.sh; then
+                    bash notary/MornNotary/sign.sh request dist/MornRunner.app notary/state
+                  else
+                    bash notary/MornNotary/sign.sh dist/MornRunner.app
+                  fi
+                '''
+              }
+            }
+          }
+        }
+        stage('Sign: Wait') {
+          steps {
+            script {
+              if (env.DRY_RUN == 'true') {
+                echo 'DRY RUN: MornNotary の署名 run が署名済みの Artifact を上げるまで待つ'
+                return
+              }
+              withCredentials([string(credentialsId: 'morn-notary-token', variable: 'GH_TOKEN')]) {
+                sh 'if [ -f notary/state/request.env ]; then bash notary/MornNotary/sign.sh wait notary/state; fi'
+              }
+            }
+          }
+        }
+        stage('Sign: Fetch') {
+          steps {
+            script {
+              if (env.DRY_RUN == 'true') {
+                echo 'DRY RUN: 署名済みの ZIP を取り出し、MornNotary の依頼ブランチと Artifact を消す'
+                return
+              }
+              withCredentials([string(credentialsId: 'morn-notary-token', variable: 'GH_TOKEN')]) {
+                sh '''
+                  if [ -f notary/state/request.env ]; then bash notary/MornNotary/sign.sh fetch notary/state; fi
                   mv dist/MornRunner-signed.zip dist/MornRunner.app.zip
+                  rm -rf notary
                 '''
               }
             }
