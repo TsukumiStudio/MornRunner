@@ -124,50 +124,56 @@ pipeline {
             archiveArtifacts artifacts: 'dist/MornRunner.app.zip', fingerprint: true
           }
         }
-        stage('Publish: GitHub Release') {
-          steps {
-            script {
-              if (env.DRY_RUN == 'true') {
-                echo "DRY RUN: TsukumiStudio/MornRunner に ${env.TAG_NAME} の Release を作り、MornRunner.app.zip を載せる"
-                return
-              }
-              withCredentials([usernamePassword(credentialsId: 'github-app-tsukumistudio', usernameVariable: 'GH_APP', passwordVariable: 'GH_TOKEN')]) {
-                sh '''
-                  if gh release view "$TAG_NAME" -R TsukumiStudio/MornRunner >/dev/null 2>&1; then
-                    gh release upload "$TAG_NAME" dist/MornRunner.app.zip --clobber -R TsukumiStudio/MornRunner
-                  else
-                    gh release create "$TAG_NAME" dist/MornRunner.app.zip --generate-notes --verify-tag -R TsukumiStudio/MornRunner
-                  fi
-                '''
+        // タグ2つのリリースが重なっても、GitHub Release と homebrew-tap の main への push がぶつからないよう1本ずつ（MornJenkins のロック）
+        stage('Publish') {
+          options { lock('mornrunner-publish') }
+          stages {
+            stage('Publish: GitHub Release') {
+              steps {
+                script {
+                  if (env.DRY_RUN == 'true') {
+                    echo "DRY RUN: TsukumiStudio/MornRunner に ${env.TAG_NAME} の Release を作り、MornRunner.app.zip を載せる"
+                    return
+                  }
+                  withCredentials([usernamePassword(credentialsId: 'github-app-tsukumistudio', usernameVariable: 'GH_APP', passwordVariable: 'GH_TOKEN')]) {
+                    sh '''
+                      if gh release view "$TAG_NAME" -R TsukumiStudio/MornRunner >/dev/null 2>&1; then
+                        gh release upload "$TAG_NAME" dist/MornRunner.app.zip --clobber -R TsukumiStudio/MornRunner
+                      else
+                        gh release create "$TAG_NAME" dist/MornRunner.app.zip --generate-notes --verify-tag -R TsukumiStudio/MornRunner
+                      fi
+                    '''
+                  }
+                }
               }
             }
-          }
-        }
-        stage('Publish: Homebrew') {
-          steps {
-            withCredentials([usernamePassword(credentialsId: 'github-app-tsukumistudio', usernameVariable: 'GH_APP', passwordVariable: 'GH_TOKEN')]) {
-              sh '''
-                rm -rf tap
-                gh repo clone TsukumiStudio/homebrew-tap tap -- --depth 1
-                sha=$(shasum -a 256 dist/MornRunner.app.zip | awk '{print $1}')
-                mkdir -p tap/Casks
-                sed -e "s/@VERSION@/${VERSION}/g" -e "s/@SHA256@/${sha}/g" Support/mornrunner.rb.in > tap/Casks/mornrunner.rb
-                ruby -c tap/Casks/mornrunner.rb
-                git -C tap diff
-                if [ "$DRY_RUN" = true ]; then
-                  echo 'DRY RUN: 上の差分を TsukumiStudio/homebrew-tap の main に push する'
-                  exit 0
-                fi
-                cd tap
-                git config user.name 'mornjenkins[bot]'
-                git config user.email '360150882+mornjenkins[bot]@users.noreply.github.com'
-                git add Casks/mornrunner.rb
-                if ! git diff --cached --quiet; then
-                  git commit -m "mornrunner ${VERSION}"
-                  git pull --rebase origin main
-                  git push origin HEAD:main
-                fi
-              '''
+            stage('Publish: Homebrew') {
+              steps {
+                withCredentials([usernamePassword(credentialsId: 'github-app-tsukumistudio', usernameVariable: 'GH_APP', passwordVariable: 'GH_TOKEN')]) {
+                  sh '''
+                    rm -rf tap
+                    gh repo clone TsukumiStudio/homebrew-tap tap -- --depth 1
+                    sha=$(shasum -a 256 dist/MornRunner.app.zip | awk '{print $1}')
+                    mkdir -p tap/Casks
+                    sed -e "s/@VERSION@/${VERSION}/g" -e "s/@SHA256@/${sha}/g" Support/mornrunner.rb.in > tap/Casks/mornrunner.rb
+                    ruby -c tap/Casks/mornrunner.rb
+                    git -C tap diff
+                    if [ "$DRY_RUN" = true ]; then
+                      echo 'DRY RUN: 上の差分を TsukumiStudio/homebrew-tap の main に push する'
+                      exit 0
+                    fi
+                    cd tap
+                    git config user.name 'mornjenkins[bot]'
+                    git config user.email '360150882+mornjenkins[bot]@users.noreply.github.com'
+                    git add Casks/mornrunner.rb
+                    if ! git diff --cached --quiet; then
+                      git commit -m "mornrunner ${VERSION}"
+                      git pull --rebase origin main
+                      git push origin HEAD:main
+                    fi
+                  '''
+                }
+              }
             }
           }
         }
